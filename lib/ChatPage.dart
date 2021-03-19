@@ -20,7 +20,10 @@ class _Message {
   _Message(this.whom, this.text);
 }
 
-class _ChatPage extends State<ChatPage> {
+class _ChatPage extends State<ChatPage> with SingleTickerProviderStateMixin {
+  double _scale;
+  AnimationController _controller;
+
   static final clientID = 0;
   BluetoothConnection connection;
 
@@ -32,9 +35,12 @@ class _ChatPage extends State<ChatPage> {
   final ScrollController listScrollController = new ScrollController();
 
   bool isConnecting = true;
+
   bool get isConnected => connection != null && connection.isConnected;
 
   bool isDisconnecting = false;
+  TextEditingController myController = TextEditingController();
+  String incomingText = "";
 
   @override
   void initState() {
@@ -68,11 +74,29 @@ class _ChatPage extends State<ChatPage> {
       print('Cannot connect, exception occured');
       print(error);
     });
+    _controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 10),
+      lowerBound: 0.0,
+      upperBound: 0.1,
+    )..addListener(() {
+        setState(() {});
+      });
+  }
+
+  void _onTapDown(TapDownDetails details) {
+    _controller.forward();
+    if (isConnected) _sendMessage("GGG");
+  }
+
+  void _onTapUp(TapUpDetails details) {
+    _controller.reverse();
   }
 
   @override
   void dispose() {
     // Avoid memory leak (`setState` after dispose) and disconnect
+    _controller.dispose();
     if (isConnected) {
       isDisconnecting = true;
       connection.dispose();
@@ -84,6 +108,8 @@ class _ChatPage extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    _scale = 0.5 - _controller.value / 3;
+
     final List<Row> list = messages.map((_message) {
       return Row(
         children: <Widget>[
@@ -118,47 +144,112 @@ class _ChatPage extends State<ChatPage> {
       body: SafeArea(
         child: Column(
           children: <Widget>[
+            SizedBox(height: 100.0),
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: TextField(
+                enabled: false,
+                controller: myController,
+                keyboardType: TextInputType.number,
+                style: TextStyle(
+                  fontSize: 16.0,
+                  color: Colors.black,
+                ),
+                decoration: InputDecoration(
+                  labelText: 'Response Text',
+                  labelStyle: TextStyle(
+                    fontSize: 16.0,
+                    color: Colors.black,
+                  ),
+                  border: OutlineInputBorder(
+                    borderSide:
+                        BorderSide(color: Color(0xFF999999), width: 0.7),
+                  ),
+                ),
+              ),
+            ),
+            SizedBox(height: 100.0),
+            GestureDetector(
+              onTapDown: _onTapDown,
+              onTapUp: _onTapUp,
+              child: Transform.scale(
+                scale: _scale,
+                child: _HomeUI,
+              ),
+            ),
             Flexible(
               child: ListView(
                   padding: const EdgeInsets.all(12.0),
                   controller: listScrollController,
                   children: list),
             ),
-            Row(
-              children: <Widget>[
-                Flexible(
-                  child: Container(
-                    margin: const EdgeInsets.only(left: 16.0),
-                    child: TextField(
-                      style: const TextStyle(fontSize: 15.0),
-                      controller: textEditingController,
-                      decoration: InputDecoration.collapsed(
-                        hintText: isConnecting
-                            ? 'Wait until connected...'
-                            : isConnected
-                                ? 'Type your message...'
-                                : 'Chat got disconnected',
-                        hintStyle: const TextStyle(color: Colors.grey),
+            Opacity(
+              opacity: 0,
+              child: Row(
+                children: <Widget>[
+                  Flexible(
+                    child: Container(
+                      margin: const EdgeInsets.only(left: 16.0),
+                      child: TextField(
+                        style: const TextStyle(fontSize: 15.0),
+                        controller: textEditingController,
+                        decoration: InputDecoration.collapsed(
+                          hintText: isConnecting
+                              ? 'Wait until connected...'
+                              : isConnected
+                                  ? 'Type your message...'
+                                  : 'Chat got disconnected',
+                          hintStyle: const TextStyle(color: Colors.grey),
+                        ),
+                        enabled: isConnected,
                       ),
-                      enabled: isConnected,
                     ),
                   ),
-                ),
-                Container(
-                  margin: const EdgeInsets.all(8.0),
-                  child: IconButton(
-                      icon: const Icon(Icons.send),
-                      onPressed: isConnected
-                          ? () => _sendMessage(textEditingController.text)
-                          : null),
-                ),
-              ],
-            )
+                  Container(
+                    margin: const EdgeInsets.all(8.0),
+                    child: IconButton(
+                        icon: const Icon(Icons.send),
+                        onPressed: isConnected
+                            ? () => _sendMessage(textEditingController.text)
+                            : null),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
     );
   }
+
+  Widget get _HomeUI => Container(
+        height: 100,
+        width: 250,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(100),
+          boxShadow: [
+            BoxShadow(
+              color: Color(0x80000000),
+              blurRadius: 30.0,
+              offset: Offset(30.0, 30.0),
+            ),
+          ],
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFA7BFE8),
+              Color(0xFF6190E8),
+            ],
+          ),
+        ),
+        child: Center(
+          child: Icon(
+            Icons.adjust,
+            size: 50,
+          ),
+        ),
+      );
 
   void _onDataReceived(Uint8List data) {
     // Allocate buffer for parsed data
@@ -190,6 +281,11 @@ class _ChatPage extends State<ChatPage> {
     int index = buffer.indexOf(13);
     if (~index != 0) {
       setState(() {
+        incomingText = backspacesCounter > 0
+            ? _messageBuffer.substring(
+                0, _messageBuffer.length - backspacesCounter)
+            : _messageBuffer + dataString.substring(0, index);
+        myController.text = incomingText;
         messages.add(
           _Message(
             1,
